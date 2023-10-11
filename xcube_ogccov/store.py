@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import atexit
+import os
 import re
 import shutil
 import sys
@@ -37,6 +38,7 @@ import dateutil.parser
 import dateutil.relativedelta
 import dateutil.rrule
 import numpy as np
+import requests
 import xarray as xr
 import xcube.core.normalize
 from xcube.core.store import DATASET_TYPE
@@ -66,6 +68,7 @@ class OGCCovDataOpener(DataOpener):
 
         self._server_url = server_url
         self._normalize_names = True
+        self._create_temporary_directory()
 
     def _create_temporary_directory(self):
         # Create a temporary directory to hold downloaded files and a hook to
@@ -91,7 +94,6 @@ class OGCCovDataOpener(DataOpener):
         return JsonObjectSchema()
 
     def open_data(self, data_id: str, **open_params) -> xr.Dataset:
-        print(f"xcube-cds version {version}", file=sys.stderr)
         # Unofficial parameters for testing, debugging, etc.
         # They're not in the schema so we remove them before validating.
         read_file_from = open_params.pop('_read_file_from', None)
@@ -108,7 +110,28 @@ class OGCCovDataOpener(DataOpener):
                            if props[k].default != UNDEFINED}
         all_open_params.update(open_params)
 
-        dataset = self._create_empty_dataset(data_id, all_open_params)
+        # dataset = self._create_empty_dataset(data_id, all_open_params)
+
+        y1, x0, y0, x1 = all_open_params['bbox']
+        datetime_ = all_open_params['datetime']
+        ds_properties = all_open_params['properties']
+
+        response = requests.get(
+                f'{self._server_url}/collections/{data_id}/coverage',
+                params=dict(
+                    f='netcdf',
+                    bbox=f'{y1},{x0},{y0},{x1}',
+                    datetime=datetime_,
+                    properties=','.join(ds_properties)
+                )
+            )
+
+        temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
+        filepath = os.path.join(temp_subdir, 'dataset.nc')
+        with open(filepath, 'bw') as fh:
+            fh.write(response.content)
+        dataset = xr.open_dataset(filepath, engine='netcdf4')
+
         if save_zarr_to:
             dataset.to_zarr(save_zarr_to)
         return dataset
@@ -250,8 +273,6 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
             normalize_names=JsonBooleanSchema(default=False)
         )
 
-        # For now, let CDS API use defaults or environment variables for
-        # most parameters.
         store_params = dict(
             server_url=JsonStringSchema(),
         )
@@ -332,10 +353,8 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
     @staticmethod
     def _is_data_type_satisfied(
             data_type: DataTypeLike) -> bool:
-        # At present, all datasets are available as cubes, so we simply check
-        # against TYPE_SPECIFIER_CUBE. If more (non-cube) datasets are added,
-        # the logic will have to be delegated to CDSDatasetHandler
-        # implementations.
+        # We expect all datasets to be available as cubes, so we simply check
+        # against TYPE_SPECIFIER_CUBE.
         if data_type is None:
             return True
         return DATASET_TYPE.is_super_type_of(data_type)
