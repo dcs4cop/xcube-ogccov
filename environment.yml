@@ -1,0 +1,5 @@
+name: xcube-ogccov
+channels:
+  - conda-forge
+dependencies:
+  - xcube >=1.2.0
