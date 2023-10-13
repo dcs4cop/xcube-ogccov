@@ -26,7 +26,7 @@ import re
 import shutil
 import tempfile
 import datetime
-from typing import Any, Container
+from typing import Any, Container, Collection
 from typing import Dict
 from typing import Iterator
 from typing import Optional
@@ -71,7 +71,7 @@ class OGCCovDataOpener(DataOpener):
 
     def get_open_data_params_schema(self, data_id: Optional[str] = None) -> \
             JsonObjectSchema:
-        self._validate_data_id(data_id, allow_none=True)
+        self._assert_valid_data_id(data_id, allow_none=True)
         params = dict(
             subset=JsonObjectSchema(),
             bbox=JsonArraySchema(items=(
@@ -131,9 +131,9 @@ class OGCCovDataOpener(DataOpener):
         ogc_params = [
             self._convert_store_param(p) for p in all_open_params.items()
         ] + [('f', 'netcdf')]
-        print(ogc_params)
+
         response = requests.get(
-            f'{self._server_url}/collections/{data_id}/coverage',
+            self._get_coverage_link(data_id),
             params=dict(ogc_params)
         )
 
@@ -146,6 +146,18 @@ class OGCCovDataOpener(DataOpener):
         if save_zarr_to:
             dataset.to_zarr(save_zarr_to)
         return dataset
+
+    def get_data_ids(self,
+                     data_type: DataTypeLike = None,
+                     include_attrs: Container[str] = None) -> \
+            Union[Iterator[str], Iterator[Tuple[str, Dict[str, Any]]]]:
+        response = requests.get(f'{self._server_url}/collections')
+        collections = response.json()['collections']
+        return (collection['id'] for collection in collections)
+
+    def has_data(self, data_id: str, data_type: Optional[str] = None) \
+            -> bool:
+        return data_id in self.get_data_ids(data_type)
 
     @staticmethod
     def _convert_store_param(kvp: Tuple[str, Any]) -> Tuple[str, str]:
@@ -313,8 +325,9 @@ class OGCCovDataOpener(DataOpener):
         else:
             return dataset
 
-    def _validate_data_id(self, data_id, allow_none=False):
-        if data_id is None and not allow_none:
+    def _assert_valid_data_id(self, data_id: str,
+                              allow_none: bool = False) -> None:
+        if (data_id is None and not allow_none) or not self.has_data(data_id):
             raise ValueError(f'Unknown data id "{data_id}"')
 
     def _create_temporary_directory(self):
@@ -334,6 +347,31 @@ class OGCCovDataOpener(DataOpener):
 
         atexit.register(delete_tempdir)
         self._tempdir = tempdir
+
+    def _get_coverage_link(self, collection_id):
+        links = self._get_collection_links(
+            collection_id,
+            {'coverage', 'http://www.opengis.net/def/rel/ogc/1.0/coverage'}
+        )
+        if len(links) > 0:
+            # If multiple coverage links available, use the first.
+            return links[0]
+        else:
+            # Fall back to standard endpoint if none specified explicitly.
+            return self._server_url + f'/{collection_id}/coverage'
+
+    def _get_collection_links(self, collection_id: str,
+                              relation: Union[str, Collection[str]]) -> \
+            list[str]:
+        response = requests.get(
+            f'{self._server_url}/collections/{collection_id}')
+        collection = response.json()
+        relations = {relation} if isinstance(relation, str) else relation
+        result = []
+        for link in collection.get('links', []):
+            if link.get('rel') in relations and 'href' in link:
+                result.append(link['href'])
+        return result
 
 
 class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
@@ -363,23 +401,13 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
         return DATASET_TYPE.alias,
 
     def get_data_types_for_data(self, data_id: str) -> Tuple[str, ...]:
-        self._validate_data_id(data_id)
+        self._assert_valid_data_id(data_id)
         return DATASET_TYPE.alias,
-
-    def get_data_ids(self,
-                     data_type: DataTypeLike = None,
-                     include_attrs: Container[str] = None) -> \
-            Union[Iterator[str], Iterator[Tuple[str, Dict[str, Any]]]]:
-        return (x for x in [])
-
-    def has_data(self, data_id: str, data_type: Optional[str] = None) \
-            -> bool:
-        return False
 
     def describe_data(self, data_id: str,
                       data_type: Optional[str] = None) \
             -> DatasetDescriptor:
-        self._validate_data_id(data_id)
+        self._assert_valid_data_id(data_id)
         self._validate_data_type(data_type)
         return DatasetDescriptor(data_id=data_id)
 
@@ -395,7 +423,7 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
                             data_type: Optional[str] = None) \
             -> Tuple[str, ...]:
         self._validate_data_type(data_type)
-        self._validate_data_id(data_id, allow_none=True)
+        self._assert_valid_data_id(data_id, allow_none=True)
         return OGCCOV_DATA_OPENER_ID,
 
     def get_open_data_params_schema(self, data_id: Optional[str] = None,
@@ -404,13 +432,13 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
         # At present, there's only one opener ID available, so we do nothing
         # with it except to check that it was correct (or None).
         self._assert_valid_opener_id(opener_id)
-        self._validate_data_id(data_id, allow_none=True)
+        self._assert_valid_data_id(data_id, allow_none=True)
         return super().get_open_data_params_schema(data_id)
 
     def open_data(self, data_id: str, opener_id: Optional[str] = None,
                   **open_params) -> xr.Dataset:
         self._assert_valid_opener_id(opener_id)
-        self._validate_data_id(data_id)
+        self._assert_valid_data_id(data_id)
         return super().open_data(data_id, **open_params)
 
     ###########################################################################
