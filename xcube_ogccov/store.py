@@ -24,7 +24,6 @@ import atexit
 import os
 import re
 import shutil
-import sys
 import tempfile
 import datetime
 from typing import Any, Container
@@ -49,12 +48,12 @@ from xcube.core.store import DataStoreError
 from xcube.core.store import DataTypeLike
 from xcube.core.store import DatasetDescriptor
 from xcube.core.store import DefaultSearchMixin
-from xcube.util.jsonschema import JsonBooleanSchema
+from xcube.util.jsonschema import JsonBooleanSchema, JsonArraySchema, \
+    JsonNumberSchema, JsonDatetimeSchema
 from xcube.util.jsonschema import JsonObjectSchema
 from xcube.util.jsonschema import JsonStringSchema
 from xcube.util.undefined import UNDEFINED
 from xcube_ogccov.constants import OGCCOV_DATA_OPENER_ID
-from xcube_ogccov.version import (version)
 
 
 class OGCCovDataOpener(DataOpener):
@@ -70,28 +69,45 @@ class OGCCovDataOpener(DataOpener):
         self._normalize_names = True
         self._create_temporary_directory()
 
-    def _create_temporary_directory(self):
-        # Create a temporary directory to hold downloaded files and a hook to
-        # delete it when the interpreter exits. xarray.open reads data lazily
-        # so we can't just delete the file after returning the Dataset. We
-        # could also use weakref hooks to delete individual files when the
-        # corresponding object is garbage collected, but even then the
-        # directory is useful to group the files and offer an extra assurance
-        # that they will be deleted.
-        tempdir = tempfile.mkdtemp()
-
-        def delete_tempdir():
-            # This method is hard to unit test, so we exclude it from test
-            # coverage reports.
-            shutil.rmtree(tempdir, ignore_errors=True)  # pragma: no cover
-
-        atexit.register(delete_tempdir)
-        self._tempdir = tempdir
-
     def get_open_data_params_schema(self, data_id: Optional[str] = None) -> \
             JsonObjectSchema:
         self._validate_data_id(data_id, allow_none=True)
-        return JsonObjectSchema()
+        params = dict(
+            subset=JsonObjectSchema(),
+            bbox=JsonArraySchema(items=(
+                JsonNumberSchema(),
+                JsonNumberSchema(),
+                JsonNumberSchema(),
+                JsonNumberSchema()),
+                description='bounding box (min_x, min_y, max_x, max_y)'),
+            datetime=JsonArraySchema(),
+            properties=JsonArraySchema(
+                items=(JsonStringSchema()),
+            ),
+            scale_factor=JsonNumberSchema(
+                description='downscaling factor, applied on each axis'
+            ),
+            scale_axes=JsonObjectSchema(
+                description='mapping from axis name to downscaling factor'
+            ),
+            scale_size=JsonObjectSchema(
+                description='mapping from axis name to desired size'
+            ),
+            subset_crs=JsonStringSchema(
+                description='CRS for the specified subset'
+            ),
+            bbox_crs=JsonStringSchema(
+                description='CRS for the specified bbox'
+            ),
+            crs=JsonStringSchema(
+                description='reproject the output to this CRS'
+            )
+        )
+        return JsonObjectSchema(
+            properties=params,
+            required=[],
+            additional_properties=False
+        )
 
     def open_data(self, data_id: str, **open_params) -> xr.Dataset:
         # Unofficial parameters for testing, debugging, etc.
@@ -112,19 +128,14 @@ class OGCCovDataOpener(DataOpener):
 
         # dataset = self._create_empty_dataset(data_id, all_open_params)
 
-        y1, x0, y0, x1 = all_open_params['bbox']
-        datetime_ = all_open_params['datetime']
-        ds_properties = all_open_params['properties']
-
+        ogc_params = [
+            self._convert_store_param(p) for p in all_open_params.items()
+        ] + [('f', 'netcdf')]
+        print(ogc_params)
         response = requests.get(
-                f'{self._server_url}/collections/{data_id}/coverage',
-                params=dict(
-                    f='netcdf',
-                    bbox=f'{y1},{x0},{y0},{x1}',
-                    datetime=datetime_,
-                    properties=','.join(ds_properties)
-                )
-            )
+            f'{self._server_url}/collections/{data_id}/coverage',
+            params=dict(ogc_params)
+        )
 
         temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
         filepath = os.path.join(temp_subdir, 'dataset.nc')
@@ -135,6 +146,51 @@ class OGCCovDataOpener(DataOpener):
         if save_zarr_to:
             dataset.to_zarr(save_zarr_to)
         return dataset
+
+    @staticmethod
+    def _convert_store_param(kvp: Tuple[str, Any]) -> Tuple[str, str]:
+        key, value = kvp
+        if key in {'scale_factor', 'subset_crs', 'bbox_crs', 'crs'}:
+            # Pass through, converting underscores to hyphens if present
+            return key.replace('_', '-'), value
+        elif key == 'datetime':
+            if len(value) == 1:
+                return 'datetime', value
+            elif len(value) == 2:
+                return 'datetime', '/'.join(value)
+            else:
+                raise ValueError(f'Invalid datetime: "{value}"')
+        elif key == 'subset':
+            return 'subset', OGCCovDataOpener._subset_dict_to_string(value)
+        elif key == 'bbox':
+            x0, y0, x1, y1 = value
+            return 'bbox', f'{y1},{x0},{y0},{x1}'
+        elif key == 'properties':
+            return 'properties', ','.join(value)
+        elif key in {'scale-axes', 'scale-size'}:
+            return (
+                key.replace('_', '-'),
+                ','.join([f'{ax}({v})' for ax, v in value.items()])
+            )
+        else:
+            raise ValueError(f'Unknown parameter "{key}"')
+
+    @staticmethod
+    def _subset_dict_to_string(subset_dict: dict[str, Any]) -> str:
+        parts = []
+        for axis, range_ in subset_dict.items():
+            if len(range_) == 1:
+                parts.append(f'{axis}({range_[0]})')
+            elif len(range_) == 2:
+                range_string = ':'.join(
+                    ['*' if x is None else f'{x}' for x in range_]
+                )
+                parts.append(f'{axis}({range_string})')
+            else:
+                raise ValueError(
+                    f'Invalid subset range {range_} for axis {axis}'
+                )
+        return ','.join(parts)
 
     def _create_empty_dataset(self, data_id, open_params: dict) -> xr.Dataset:
         """Make a dataset with space and time dimensions but no data variables
@@ -260,6 +316,24 @@ class OGCCovDataOpener(DataOpener):
     def _validate_data_id(self, data_id, allow_none=False):
         if data_id is None and not allow_none:
             raise ValueError(f'Unknown data id "{data_id}"')
+
+    def _create_temporary_directory(self):
+        # Create a temporary directory to hold downloaded files and a hook to
+        # delete it when the interpreter exits. xarray.open reads data lazily
+        # so we can't just delete the file after returning the Dataset. We
+        # could also use weakref hooks to delete individual files when the
+        # corresponding object is garbage collected, but even then the
+        # directory is useful to group the files and offer an extra assurance
+        # that they will be deleted.
+        tempdir = tempfile.mkdtemp()
+
+        def delete_tempdir():
+            # This method is hard to unit test, so we exclude it from test
+            # coverage reports.
+            shutil.rmtree(tempdir, ignore_errors=True)  # pragma: no cover
+
+        atexit.register(delete_tempdir)
+        self._tempdir = tempdir
 
 
 class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
