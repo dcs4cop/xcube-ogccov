@@ -26,7 +26,7 @@ import re
 import shutil
 import tempfile
 import datetime
-from typing import Any, Container, Collection
+from typing import Any, Container, Collection, Mapping
 from typing import Dict
 from typing import Iterator
 from typing import Optional
@@ -409,7 +409,49 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
             -> DatasetDescriptor:
         self._assert_valid_data_id(data_id)
         self._validate_data_type(data_type)
-        return DatasetDescriptor(data_id=data_id)
+
+        return DatasetDescriptor(
+            data_id=data_id,
+            data_type=DATASET_TYPE,
+            time_period=None,  # str
+            spatial_res=None,  # float
+            coords=None,  # Mapping[str, 'VariableDescriptor'],
+            data_vars=None,  # Mapping[str, 'VariableDescriptor'],
+            attrs=None,  # Mapping[Hashable, any],
+            open_params_schema=None,  # JsonObjectSchema,
+            **(self._domainset_params(data_id))
+        )
+
+    def _domainset_params(self, data_id: str) -> dict[str, Any]:
+        params = {}
+        domainset = requests.get(
+            f'{self._server_url}/collections/{data_id}/coverage/domainset',
+            params=dict(f='json')
+        ).json()
+        grid = domainset.get('generalGrid', {})
+        params['dims'] = {}
+        bbox = [None, None, None, None]
+        for index, axis in enumerate(grid.get('axis', [])):
+            label = axis.get('axisLabel', '?')
+            params['dims'][label] = index
+            if label in {'lon', 'longitude', 'x'}:
+                bbox[0] = float(axis.get('lowerBound', '0'))
+                bbox[2] = float(axis.get('upperBound', '0'))
+            elif label in {'lat', 'latitude', 'y'}:
+                bbox[1] = float(axis.get('lowerBound', '0'))
+                bbox[3] = float(axis.get('upperBound', '0'))
+            elif label in {'time', 't'}:
+                try:
+                    params['time_range'] = tuple(
+                        datetime.datetime.fromisoformat(
+                            axis.get(bound)).strftime('%Y-%m-%d')
+                        for bound in ['lowerBound', 'upperBound'])
+                except ValueError:
+                    # Ignore malformed timestamps
+                    pass
+        params['bbox'] = None if None in bbox else tuple(bbox)
+        params['crs'] = grid.get('srsName')
+        return params
 
     # noinspection PyTypeChecker
     def search_data(self, data_type: Optional[DataTypeLike] = None,
