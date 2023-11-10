@@ -73,7 +73,7 @@ class OGCCovDataOpener(DataOpener):
             JsonObjectSchema:
         self._assert_valid_data_id(data_id, allow_none=True)
         params = dict(
-            subset=JsonObjectSchema(),
+            subset=JsonObjectSchema(),  # TODO make the subset schema stricter
             bbox=JsonArraySchema(items=(
                 JsonNumberSchema(),
                 JsonNumberSchema(),
@@ -121,7 +121,7 @@ class OGCCovDataOpener(DataOpener):
         schema.validate_instance(open_params)
 
         # Fill in defaults from the schema
-        props = self.get_open_data_params_schema(data_id).properties
+        props = schema.properties
         all_open_params = {k: props[k].default for k in props
                            if props[k].default != UNDEFINED}
         all_open_params.update(open_params)
@@ -137,15 +137,26 @@ class OGCCovDataOpener(DataOpener):
             params=dict(ogc_params)
         )
 
-        temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
-        filepath = os.path.join(temp_subdir, 'dataset.nc')
-        with open(filepath, 'bw') as fh:
-            fh.write(response.content)
-        dataset = xr.open_dataset(filepath, engine='netcdf4')
+        if response.status_code == 200:
+            temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
+            filepath = os.path.join(temp_subdir, 'dataset.nc')
+            with open(filepath, 'bw') as fh:
+                fh.write(response.content)
+            dataset = xr.open_dataset(filepath, engine='netcdf4')
 
-        if save_zarr_to:
-            dataset.to_zarr(save_zarr_to)
-        return dataset
+            if save_zarr_to:
+                dataset.to_zarr(save_zarr_to)
+            return dataset
+        else:
+            r = response.json()
+            if 'error' in r:
+                e = r['error']
+                message = e['message']
+            else:
+                message = response.content
+            raise DataStoreError(
+                f'Error opening data: {response.status_code}: {message}'
+            )
 
     def get_data_ids(self,
                      data_type: DataTypeLike = None,
@@ -176,7 +187,7 @@ class OGCCovDataOpener(DataOpener):
             return 'subset', OGCCovDataOpener._subset_dict_to_string(value)
         elif key == 'bbox':
             x0, y0, x1, y1 = value
-            return 'bbox', f'{y1},{x0},{y0},{x1}'
+            return 'bbox', f'{x0},{y0},{x1},{y1}'
         elif key == 'properties':
             return 'properties', ','.join(value)
         elif key in {'scale-axes', 'scale-size'}:
@@ -351,7 +362,12 @@ class OGCCovDataOpener(DataOpener):
     def _get_coverage_link(self, collection_id):
         links = self._get_collection_links(
             collection_id,
-            {'coverage', 'http://www.opengis.net/def/rel/ogc/1.0/coverage'}
+            {
+                'rel': {'coverage',
+                        'http://www.opengis.net/def/rel/ogc/1.0/coverage'},
+                'type': {'netcdf', 'application/netcdf',
+                         'application/x-netcdf'}
+            }
         )
         if len(links) > 0:
             # If multiple coverage links available, use the first.
@@ -361,16 +377,17 @@ class OGCCovDataOpener(DataOpener):
             return self._server_url + f'/{collection_id}/coverage'
 
     def _get_collection_links(self, collection_id: str,
-                              relation: Union[str, Collection[str]]) -> \
+                              selectors: dict[str, Collection[str]]) -> \
             list[str]:
         response = requests.get(
             f'{self._server_url}/collections/{collection_id}')
         collection = response.json()
-        relations = {relation} if isinstance(relation, str) else relation
         result = []
         for link in collection.get('links', []):
-            if link.get('rel') in relations and 'href' in link:
+            if (all([link.get(prop) in selectors[prop] for prop in selectors])
+                    and 'href' in link):
                 result.append(link['href'])
+        print(result)
         return result
 
 
