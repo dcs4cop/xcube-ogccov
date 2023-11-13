@@ -32,6 +32,7 @@ from typing import Iterator
 from typing import Optional
 from typing import Tuple
 from typing import Union
+import collections.abc
 
 import dateutil.parser
 import dateutil.relativedelta
@@ -202,17 +203,21 @@ class OGCCovDataOpener(DataOpener):
     def _subset_dict_to_string(subset_dict: dict[str, Any]) -> str:
         parts = []
         for axis, range_ in subset_dict.items():
-            if len(range_) == 1:
-                parts.append(f'{axis}({range_[0]})')
-            elif len(range_) == 2:
-                range_string = ':'.join(
-                    ['*' if x is None else f'{x}' for x in range_]
-                )
-                parts.append(f'{axis}({range_string})')
+            if (isinstance(range_, collections.abc.Sequence)
+                    and not isinstance(range_, str)):
+                if len(range_) == 1:
+                    parts.append(f'{axis}({range_[0]})')
+                elif len(range_) == 2:
+                    range_string = ':'.join(
+                        ['*' if x is None else f'{x}' for x in range_]
+                    )
+                    parts.append(f'{axis}({range_string})')
+                else:
+                    raise ValueError(
+                        f'Invalid subset range {range_} for axis {axis}'
+                    )
             else:
-                raise ValueError(
-                    f'Invalid subset range {range_} for axis {axis}'
-                )
+                parts.append(f'{axis}({str(range_)})')
         return ','.join(parts)
 
     def _create_empty_dataset(self, data_id, open_params: dict) -> xr.Dataset:
