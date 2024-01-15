@@ -49,8 +49,12 @@ from xcube.core.store import DataStoreError
 from xcube.core.store import DataTypeLike
 from xcube.core.store import DatasetDescriptor
 from xcube.core.store import DefaultSearchMixin
-from xcube.util.jsonschema import JsonBooleanSchema, JsonArraySchema, \
-    JsonNumberSchema, JsonDatetimeSchema
+from xcube.util.jsonschema import (
+    JsonBooleanSchema,
+    JsonArraySchema,
+    JsonNumberSchema,
+    JsonDatetimeSchema,
+)
 from xcube.util.jsonschema import JsonObjectSchema
 from xcube.util.jsonschema import JsonStringSchema
 from xcube.util.undefined import UNDEFINED
@@ -70,131 +74,137 @@ class OGCCovDataOpener(DataOpener):
         self._normalize_names = True
         self._create_temporary_directory()
 
-    def get_open_data_params_schema(self, data_id: Optional[str] = None) -> \
-            JsonObjectSchema:
+    def get_open_data_params_schema(
+        self, data_id: Optional[str] = None
+    ) -> JsonObjectSchema:
         self._assert_valid_data_id(data_id, allow_none=True)
         params = dict(
             subset=JsonObjectSchema(),  # TODO make the subset schema stricter
-            bbox=JsonArraySchema(items=(
-                JsonNumberSchema(),
-                JsonNumberSchema(),
-                JsonNumberSchema(),
-                JsonNumberSchema()),
-                description='bounding box (min_x, min_y, max_x, max_y)'),
+            bbox=JsonArraySchema(
+                items=(
+                    JsonNumberSchema(),
+                    JsonNumberSchema(),
+                    JsonNumberSchema(),
+                    JsonNumberSchema(),
+                ),
+                description="bounding box (min_x, min_y, max_x, max_y)",
+            ),
             datetime=JsonArraySchema(),
             properties=JsonArraySchema(
-                items=(JsonStringSchema(enum=self._get_collection_properties(data_id))),
+                items=(
+                    JsonStringSchema(
+                        enum=self._get_collection_properties(data_id)
+                    )
+                ),
             ),
             scale_factor=JsonNumberSchema(
-                description='downscaling factor, applied on each axis'
+                description="downscaling factor, applied on each axis"
             ),
             scale_axes=JsonObjectSchema(
-                description='mapping from axis name to downscaling factor'
+                description="mapping from axis name to downscaling factor"
             ),
             scale_size=JsonObjectSchema(
-                description='mapping from axis name to desired size'
+                description="mapping from axis name to desired size"
             ),
             subset_crs=JsonStringSchema(
-                description='CRS for the specified subset'
+                description="CRS for the specified subset"
             ),
             bbox_crs=JsonStringSchema(
-                description='CRS for the specified bbox'
+                description="CRS for the specified bbox"
             ),
             crs=JsonStringSchema(
-                description='reproject the output to this CRS'
-            )
+                description="reproject the output to this CRS"
+            ),
         )
         return JsonObjectSchema(
-            properties=params,
-            required=[],
-            additional_properties=False
+            properties=params, required=[], additional_properties=False
         )
 
     def open_data(self, data_id: str, **open_params) -> xr.Dataset:
         # Unofficial parameters for testing, debugging, etc.
         # They're not in the schema so we remove them before validating.
-        read_file_from = open_params.pop('_read_file_from', None)
-        save_file_to = open_params.pop('_save_file_to', None)
-        save_zarr_to = open_params.pop('_save_zarr_to', None)
-        save_request_to = open_params.pop('_save_request_to', None)
+        read_file_from = open_params.pop("_read_file_from", None)
+        save_file_to = open_params.pop("_save_file_to", None)
+        save_zarr_to = open_params.pop("_save_zarr_to", None)
+        save_request_to = open_params.pop("_save_request_to", None)
 
         schema = self.get_open_data_params_schema(data_id)
         schema.validate_instance(open_params)
 
         # Fill in defaults from the schema
         props = schema.properties
-        all_open_params = {k: props[k].default for k in props
-                           if props[k].default != UNDEFINED}
+        all_open_params = {
+            k: props[k].default for k in props if props[k].default != UNDEFINED
+        }
         all_open_params.update(open_params)
 
         # dataset = self._create_empty_dataset(data_id, all_open_params)
 
         ogc_params = [
             self._convert_store_param(p) for p in all_open_params.items()
-        ] + [('f', 'netcdf')]
+        ] + [("f", "netcdf")]
 
         response = requests.get(
-            self._get_coverage_link(data_id),
-            params=dict(ogc_params)
+            self._get_coverage_link(data_id), params=dict(ogc_params)
         )
 
         if response.status_code == 200:
             temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
-            filepath = os.path.join(temp_subdir, 'dataset.nc')
-            with open(filepath, 'bw') as fh:
+            filepath = os.path.join(temp_subdir, "dataset.nc")
+            with open(filepath, "bw") as fh:
                 fh.write(response.content)
-            dataset = xr.open_dataset(filepath, engine='netcdf4')
+            dataset = xr.open_dataset(filepath, engine="netcdf4")
 
             if save_zarr_to:
                 dataset.to_zarr(save_zarr_to)
             return dataset
         else:
             r = response.json()
-            if 'error' in r:
-                e = r['error']
-                message = e['message']
+            if "error" in r:
+                e = r["error"]
+                message = e["message"]
             else:
                 message = response.content
             raise DataStoreError(
-                f'Error opening data: {response.status_code}: {message}'
+                f"Error opening data: {response.status_code}: {message}"
             )
 
-    def get_data_ids(self,
-                     data_type: DataTypeLike = None,
-                     include_attrs: Container[str] = None) -> \
-            Union[Iterator[str], Iterator[Tuple[str, Dict[str, Any]]]]:
-        response = requests.get(f'{self._server_url}/collections')
-        collections = response.json()['collections']
-        return (collection['id'] for collection in collections)
+    def get_data_ids(
+        self,
+        data_type: DataTypeLike = None,
+        include_attrs: Container[str] = None,
+    ) -> Union[Iterator[str], Iterator[Tuple[str, Dict[str, Any]]]]:
+        response = requests.get(f"{self._server_url}/collections")
+        collections = response.json()["collections"]
+        return (collection["id"] for collection in collections)
 
-    def has_data(self, data_id: str, data_type: Optional[str] = None) \
-            -> bool:
+    def has_data(self, data_id: str, data_type: Optional[str] = None) -> bool:
         return data_id in self.get_data_ids(data_type)
 
     @staticmethod
     def _convert_store_param(kvp: Tuple[str, Any]) -> Tuple[str, str]:
         key, value = kvp
-        if key in {'scale_factor', 'subset_crs', 'bbox_crs', 'crs'}:
+        if key in {"scale_factor", "subset_crs", "bbox_crs", "crs"}:
             # Pass through, converting underscores to hyphens if present
-            return key.replace('_', '-'), value
-        elif key == 'datetime':
+            return key.replace("_", "-"), value
+        elif key == "datetime":
             if len(value) == 1:
-                return 'datetime', value
+                return "datetime", value
             elif len(value) == 2:
-                return 'datetime', '/'.join(value)
+                return "datetime", "/".join(value)
             else:
                 raise ValueError(f'Invalid datetime: "{value}"')
-        elif key == 'subset':
-            return 'subset', OGCCovDataOpener._subset_dict_to_string(value)
-        elif key == 'bbox':
+        elif key == "subset":
+            return "subset", OGCCovDataOpener._subset_dict_to_string(value)
+        elif key == "bbox":
             x0, y0, x1, y1 = value
-            return 'bbox', f'{x0},{y0},{x1},{y1}'
-        elif key == 'properties':
-            return 'properties', ','.join(value)
-        elif key in {'scale-axes', 'scale-size'}:
+            return "bbox", f"{x0},{y0},{x1},{y1}"
+        elif key == "properties":
+            return "properties", ",".join(value)
+        elif key in {"scale-axes", "scale-size"}:
             return (
-                key.replace('_', '-'),
-                ','.join([f'{ax}({v})' for ax, v in value.items()])
+                key.replace("_", "-"),
+                ",".join([f"{ax}({v})" for ax, v in value.items()]),
             )
         else:
             raise ValueError(f'Unknown parameter "{key}"')
@@ -203,22 +213,23 @@ class OGCCovDataOpener(DataOpener):
     def _subset_dict_to_string(subset_dict: dict[str, Any]) -> str:
         parts = []
         for axis, range_ in subset_dict.items():
-            if (isinstance(range_, collections.abc.Sequence)
-                    and not isinstance(range_, str)):
+            if isinstance(range_, collections.abc.Sequence) and not isinstance(
+                range_, str
+            ):
                 if len(range_) == 1:
-                    parts.append(f'{axis}({range_[0]})')
+                    parts.append(f"{axis}({range_[0]})")
                 elif len(range_) == 2:
-                    range_string = ':'.join(
-                        ['*' if x is None else f'{x}' for x in range_]
+                    range_string = ":".join(
+                        ["*" if x is None else f"{x}" for x in range_]
                     )
-                    parts.append(f'{axis}({range_string})')
+                    parts.append(f"{axis}({range_string})")
                 else:
                     raise ValueError(
-                        f'Invalid subset range {range_} for axis {axis}'
+                        f"Invalid subset range {range_} for axis {axis}"
                     )
             else:
-                parts.append(f'{axis}({str(range_)})')
-        return ','.join(parts)
+                parts.append(f"{axis}({str(range_)})")
+        return ",".join(parts)
 
     def _create_empty_dataset(self, data_id, open_params: dict) -> xr.Dataset:
         """Make a dataset with space and time dimensions but no data variables
@@ -230,18 +241,20 @@ class OGCCovDataOpener(DataOpener):
 
         store = OGCCovDataStore()
         data_descriptor = store.describe_data(data_id)
-        bbox = open_params.get('bbox', data_descriptor.bbox)
-        spatial_res = open_params.get('spatial_res',
-                                      data_descriptor.spatial_res)
+        bbox = open_params.get("bbox", data_descriptor.bbox)
+        spatial_res = open_params.get(
+            "spatial_res", data_descriptor.spatial_res
+        )
         # arange returns a half-open range, so we add *almost* a whole
         # spatial_res to the upper limit to make sure that it's included.
         lons = np.arange(bbox[0], bbox[2] + (spatial_res * 0.99), spatial_res)
         lats = np.arange(bbox[1], bbox[3] + (spatial_res * 0.99), spatial_res)
 
-        time_range = open_params['time_range']
-        times = self._create_time_range(time_range[0], time_range[1],
-                                        data_descriptor.time_period)
-        return xr.Dataset({}, coords={'time': times, 'lat': lats, 'lon': lons})
+        time_range = open_params["time_range"]
+        times = self._create_time_range(
+            time_range[0], time_range[1], data_descriptor.time_period
+        )
+        return xr.Dataset({}, coords={"time": times, "lat": lats, "lon": lons})
 
     @staticmethod
     def _create_time_range(t_start: str, t_end: str, t_interval: str):
@@ -261,10 +274,14 @@ class OGCCovDataOpener(DataOpener):
                  to the nearest whole month.
         """
         dt_start = dateutil.parser.isoparse(t_start)
-        dt_end = datetime.datetime.now() if t_end is None \
+        dt_end = (
+            datetime.datetime.now()
+            if t_end is None
             else dateutil.parser.isoparse(t_end)
-        period_number, period_unit = \
-            OGCCovDataOpener._parse_time_period(t_interval)
+        )
+        period_number, period_unit = OGCCovDataOpener._parse_time_period(
+            t_interval
+        )
         timedelta = np.timedelta64(period_number, period_unit)
         relativedelta = OGCCovDataOpener._period_to_relativedelta(
             period_number, period_unit
@@ -273,34 +290,44 @@ class OGCCovDataOpener(DataOpener):
         # Months and years can be of variable length, so we need to reduce the
         # resolution of the start and end appropriately if the aggregation
         # period is in one of these units.
-        if period_unit in 'MY':
-            range_start = dt_start.strftime('%Y-%m')
-            range_end = (dt_end + relativedelta - one_microsecond). \
-                strftime('%Y-%m')
+        if period_unit in "MY":
+            range_start = dt_start.strftime("%Y-%m")
+            range_end = (dt_end + relativedelta - one_microsecond).strftime(
+                "%Y-%m"
+            )
         else:
             range_start = dt_start.isoformat()
             range_end = (dt_end + relativedelta - one_microsecond).isoformat()
 
-        return np.arange(range_start, range_end, timedelta,
-                         dtype=f'datetime64')
+        return np.arange(
+            range_start, range_end, timedelta, dtype=f"datetime64"
+        )
 
     @staticmethod
     def _parse_time_period(specifier: str) -> Tuple[int, str]:
         """Convert a time period (e.g. '10D', 'Y') to a NumPy timedelta"""
-        time_match = re.match(r'^(\d+)([hmsDWMY])$',
-                              specifier)
+        time_match = re.match(r"^(\d+)([hmsDWMY])$", specifier)
         time_number_str = time_match.group(1)
-        time_number = 1 if time_number_str == '' else int(time_number_str)
+        time_number = 1 if time_number_str == "" else int(time_number_str)
         time_unit = time_match.group(2)
         return time_number, time_unit
 
     @staticmethod
-    def _period_to_relativedelta(number: int, unit: str) \
-            -> dateutil.relativedelta:
-        conversion = dict(Y='years', M='months', D='days', W='weeks',
-                          h='hours', m='minutes', s='seconds')
-        return dateutil.relativedelta. \
-            relativedelta(**{conversion[unit]: number})
+    def _period_to_relativedelta(
+        number: int, unit: str
+    ) -> dateutil.relativedelta:
+        conversion = dict(
+            Y="years",
+            M="months",
+            D="days",
+            W="weeks",
+            h="hours",
+            m="minutes",
+            s="seconds",
+        )
+        return dateutil.relativedelta.relativedelta(
+            **{conversion[unit]: number}
+        )
 
     def _normalize_dataset(self, dataset):
         dataset = xcube.core.normalize.normalize_dataset(dataset)
@@ -314,16 +341,16 @@ class OGCCovDataOpener(DataOpener):
         # dataset = dataset.rename_vars({'longitude': 'lon', 'latitude': 'lat'})
         # dataset.transpose('time', ..., 'lat', 'lon')
 
-        dataset.coords['time'].attrs['standard_name'] = 'time'
+        dataset.coords["time"].attrs["standard_name"] = "time"
         # Correct units not entirely clear: cubespec document says
         # degrees_north / degrees_east for WGS84 Schema, but SH Plugin
         # had decimal_degrees.
-        if 'lat' in dataset.coords:
-            dataset.coords['lat'].attrs['standard_name'] = 'latitude'
-            dataset.coords['lat'].attrs['units'] = 'degrees_north'
-        if 'lon' in dataset.coords:
-            dataset.coords['lon'].attrs['standard_name'] = 'longitude'
-            dataset.coords['lon'].attrs['units'] = 'degrees_east'
+        if "lat" in dataset.coords:
+            dataset.coords["lat"].attrs["standard_name"] = "latitude"
+            dataset.coords["lat"].attrs["units"] = "degrees_north"
+        if "lon" in dataset.coords:
+            dataset.coords["lon"].attrs["standard_name"] = "longitude"
+            dataset.coords["lon"].attrs["units"] = "degrees_east"
 
         # TODO: Temporal coordinate variables MUST have units, standard_name,
         # and any others. standard_name MUST be "time", units MUST have
@@ -333,7 +360,7 @@ class OGCCovDataOpener(DataOpener):
         if self._normalize_names:
             rename_dict = {}
             for name in dataset.data_vars.keys():
-                normalized_name = re.sub(r'\W|^(?=\d)', '_', str(name))
+                normalized_name = re.sub(r"\W|^(?=\d)", "_", str(name))
                 if name != normalized_name:
                     rename_dict[name] = normalized_name
             dataset_renamed = dataset.rename_vars(rename_dict)
@@ -341,8 +368,9 @@ class OGCCovDataOpener(DataOpener):
         else:
             return dataset
 
-    def _assert_valid_data_id(self, data_id: str,
-                              allow_none: bool = False) -> None:
+    def _assert_valid_data_id(
+        self, data_id: str, allow_none: bool = False
+    ) -> None:
         if (data_id is None and not allow_none) or not self.has_data(data_id):
             raise ValueError(f'Unknown data id "{data_id}"')
 
@@ -368,70 +396,75 @@ class OGCCovDataOpener(DataOpener):
         links = self._get_collection_links(
             collection_id,
             {
-                'rel': {'coverage',
-                        'http://www.opengis.net/def/rel/ogc/1.0/coverage'},
-                'type': {'netcdf', 'application/netcdf',
-                         'application/x-netcdf'}
-            }
+                "rel": {
+                    "coverage",
+                    "http://www.opengis.net/def/rel/ogc/1.0/coverage",
+                },
+                "type": {
+                    "netcdf",
+                    "application/netcdf",
+                    "application/x-netcdf",
+                },
+            },
         )
         if len(links) > 0:
             # If multiple coverage links available, use the first.
             return links[0]
         else:
             # Fall back to standard endpoint if none specified explicitly.
-            return self._server_url + f'/{collection_id}/coverage'
+            return self._server_url + f"/{collection_id}/coverage"
 
     def _get_collection_properties(self, collection_id: str):
         url = self._get_collection_link(
             collection_id,
             {
-                'rel': {'http://www.opengis.net/def/rel/ogc/1.0/schema'},
-                'type': {'application/json'}
+                "rel": {"http://www.opengis.net/def/rel/ogc/1.0/schema"},
+                "type": {"application/json"},
             },
-            f'collections/{collection_id}/schema'
+            f"collections/{collection_id}/schema",
         )
         response = requests.get(url)
         schema = response.json()
-        return list(schema['properties'].keys())
+        return list(schema["properties"].keys())
 
     def _get_collection_link(
-            self, collection_id: str,
-            selectors: dict[str, Collection[str]], fallback: str) -> str:
-        links = self._get_collection_links(
-            collection_id,
-            selectors
-        )
+        self,
+        collection_id: str,
+        selectors: dict[str, Collection[str]],
+        fallback: str,
+    ) -> str:
+        links = self._get_collection_links(collection_id, selectors)
         if len(links) > 0:
             # If multiple coverage links available, use the first.
             return links[0]
         else:
             # Fall back to standard endpoint if none specified explicitly.
-            return self._server_url + '/' + fallback
+            return self._server_url + "/" + fallback
 
-    def _get_collection_links(self, collection_id: str,
-                              selectors: dict[str, Collection[str]]) -> \
-            list[str]:
+    def _get_collection_links(
+        self, collection_id: str, selectors: dict[str, Collection[str]]
+    ) -> list[str]:
         response = requests.get(
-            f'{self._server_url}/collections/{collection_id}')
+            f"{self._server_url}/collections/{collection_id}"
+        )
         collection = response.json()
         result = []
-        for link in collection.get('links', []):
-            if (all([link.get(prop) in selectors[prop] for prop in selectors])
-                    and 'href' in link):
-                result.append(link['href'])
+        for link in collection.get("links", []):
+            if (
+                all([link.get(prop) in selectors[prop] for prop in selectors])
+                and "href" in link
+            ):
+                result.append(link["href"])
         return result
 
 
 class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @classmethod
     def get_data_store_params_schema(cls) -> JsonObjectSchema:
-        params = dict(
-            normalize_names=JsonBooleanSchema(default=False)
-        )
+        params = dict(normalize_names=JsonBooleanSchema(default=False))
 
         store_params = dict(
             server_url=JsonStringSchema(),
@@ -439,22 +472,20 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
 
         params.update(store_params)
         return JsonObjectSchema(
-            properties=params,
-            required=None,
-            additional_properties=False
+            properties=params, required=None, additional_properties=False
         )
 
     @classmethod
     def get_data_types(cls) -> Tuple[str, ...]:
-        return DATASET_TYPE.alias,
+        return (DATASET_TYPE.alias,)
 
     def get_data_types_for_data(self, data_id: str) -> Tuple[str, ...]:
         self._assert_valid_data_id(data_id)
-        return DATASET_TYPE.alias,
+        return (DATASET_TYPE.alias,)
 
-    def describe_data(self, data_id: str,
-                      data_type: Optional[str] = None) \
-            -> DatasetDescriptor:
+    def describe_data(
+        self, data_id: str, data_type: Optional[str] = None
+    ) -> DatasetDescriptor:
         self._assert_valid_data_id(data_id)
         self._validate_data_type(data_type)
 
@@ -467,66 +498,68 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
             data_vars=None,  # Mapping[str, 'VariableDescriptor'],
             attrs=None,  # Mapping[Hashable, any],
             open_params_schema=None,  # JsonObjectSchema,
-            **(self._domainset_params(data_id))
+            **(self._domainset_params(data_id)),
         )
 
     def _domainset_params(self, data_id: str) -> dict[str, Any]:
         params = {}
         domainset = requests.get(
-            f'{self._server_url}/collections/{data_id}/coverage/domainset',
-            params=dict(f='json')
+            f"{self._server_url}/collections/{data_id}/coverage/domainset",
+            params=dict(f="json"),
         ).json()
-        grid = domainset.get('generalGrid', {})
-        params['dims'] = {}
+        grid = domainset.get("generalGrid", {})
+        params["dims"] = {}
         bbox = [None, None, None, None]
-        for index, axis in enumerate(grid.get('axis', [])):
-            label = axis.get('axisLabel', '?')
-            params['dims'][label] = index
-            if label in {'lon', 'longitude', 'x'}:
-                bbox[0] = float(axis.get('lowerBound', '0'))
-                bbox[2] = float(axis.get('upperBound', '0'))
-            elif label in {'lat', 'latitude', 'y'}:
-                bbox[1] = float(axis.get('lowerBound', '0'))
-                bbox[3] = float(axis.get('upperBound', '0'))
-            elif label in {'time', 't'}:
+        for index, axis in enumerate(grid.get("axis", [])):
+            label = axis.get("axisLabel", "?")
+            params["dims"][label] = index
+            if label in {"lon", "longitude", "x"}:
+                bbox[0] = float(axis.get("lowerBound", "0"))
+                bbox[2] = float(axis.get("upperBound", "0"))
+            elif label in {"lat", "latitude", "y"}:
+                bbox[1] = float(axis.get("lowerBound", "0"))
+                bbox[3] = float(axis.get("upperBound", "0"))
+            elif label in {"time", "t"}:
                 try:
-                    params['time_range'] = tuple(
+                    params["time_range"] = tuple(
                         datetime.datetime.fromisoformat(
-                            axis.get(bound)).strftime('%Y-%m-%d')
-                        for bound in ['lowerBound', 'upperBound'])
+                            axis.get(bound)
+                        ).strftime("%Y-%m-%d")
+                        for bound in ["lowerBound", "upperBound"]
+                    )
                 except ValueError:
                     # Ignore malformed timestamps
                     pass
-        params['bbox'] = None if None in bbox else tuple(bbox)
-        params['crs'] = grid.get('srsName')
+        params["bbox"] = None if None in bbox else tuple(bbox)
+        params["crs"] = grid.get("srsName")
         return params
 
     # noinspection PyTypeChecker
-    def search_data(self, data_type: Optional[DataTypeLike] = None,
-                    **search_params) \
-            -> Iterator[DataDescriptor]:
+    def search_data(
+        self, data_type: Optional[DataTypeLike] = None, **search_params
+    ) -> Iterator[DataDescriptor]:
         self._validate_data_type(data_type)
-        return super().search_data(data_type=data_type,
-                                   **search_params)
+        return super().search_data(data_type=data_type, **search_params)
 
-    def get_data_opener_ids(self, data_id: Optional[str] = None,
-                            data_type: Optional[str] = None) \
-            -> Tuple[str, ...]:
+    def get_data_opener_ids(
+        self, data_id: Optional[str] = None, data_type: Optional[str] = None
+    ) -> Tuple[str, ...]:
         self._validate_data_type(data_type)
         self._assert_valid_data_id(data_id, allow_none=True)
-        return OGCCOV_DATA_OPENER_ID,
+        return (OGCCOV_DATA_OPENER_ID,)
 
-    def get_open_data_params_schema(self, data_id: Optional[str] = None,
-                                    opener_id: Optional[str] = None) \
-            -> JsonObjectSchema:
+    def get_open_data_params_schema(
+        self, data_id: Optional[str] = None, opener_id: Optional[str] = None
+    ) -> JsonObjectSchema:
         # At present, there's only one opener ID available, so we do nothing
         # with it except to check that it was correct (or None).
         self._assert_valid_opener_id(opener_id)
         self._assert_valid_data_id(data_id, allow_none=True)
         return super().get_open_data_params_schema(data_id)
 
-    def open_data(self, data_id: str, opener_id: Optional[str] = None,
-                  **open_params) -> xr.Dataset:
+    def open_data(
+        self, data_id: str, opener_id: Optional[str] = None, **open_params
+    ) -> xr.Dataset:
         self._assert_valid_opener_id(opener_id)
         self._assert_valid_data_id(data_id)
         return super().open_data(data_id, **open_params)
@@ -538,13 +571,12 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
     def _validate_data_type(data_type: DataTypeLike):
         if not OGCCovDataStore._is_data_type_satisfied(data_type):
             raise DataStoreError(
-                f'Supplied data type {data_type!r} is not compatible'
+                f"Supplied data type {data_type!r} is not compatible"
                 f' with "{DATASET_TYPE!r}."'
             )
 
     @staticmethod
-    def _is_data_type_satisfied(
-            data_type: DataTypeLike) -> bool:
+    def _is_data_type_satisfied(data_type: DataTypeLike) -> bool:
         # We expect all datasets to be available as cubes, so we simply check
         # against TYPE_SPECIFIER_CUBE.
         if data_type is None:
@@ -556,4 +588,5 @@ class OGCCovDataStore(DefaultSearchMixin, OGCCovDataOpener, DataStore):
         if opener_id is not None and opener_id != OGCCOV_DATA_OPENER_ID:
             raise DataStoreError(
                 f'Data opener identifier must be "{OGCCOV_DATA_OPENER_ID}"'
-                f'but got "{opener_id}"')
+                f'but got "{opener_id}"'
+            )

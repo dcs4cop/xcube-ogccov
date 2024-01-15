@@ -31,16 +31,18 @@ from xcube_ogccov.constants import OGCCOV_DATA_STORE_ID
 def init_plugin(ext_registry: extension.ExtensionRegistry):
     ext_registry.add_extension(
         loader=extension.import_component(
-            'xcube_ogccov.store:OGCCovDataStore'
+            "xcube_ogccov.store:OGCCovDataStore"
         ),
         point=EXTENSION_POINT_DATA_STORES,
         name=OGCCOV_DATA_STORE_ID,
-        description='OGC API - COverages')
+        description="OGC API - COverages",
+    )
 
     ext_registry.add_extension(
         loader=extension.import_component(
-            'xcube_ogccov.store:OGCCovDataOpener'
+            "xcube_ogccov.store:OGCCovDataOpener"
         ),
         point=EXTENSION_POINT_DATA_OPENERS,
         name=OGCCOV_DATA_OPENER_ID,
-        description='Data from OGC API - Coverages')
+        description="Data from OGC API - Coverages",
+    )
