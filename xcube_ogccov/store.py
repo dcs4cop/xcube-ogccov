@@ -83,7 +83,7 @@ class OGCCovDataOpener(DataOpener):
                 description='bounding box (min_x, min_y, max_x, max_y)'),
             datetime=JsonArraySchema(),
             properties=JsonArraySchema(
-                items=(JsonStringSchema()),
+                items=(JsonStringSchema(enum=self._get_collection_properties(data_id))),
             ),
             scale_factor=JsonNumberSchema(
                 description='downscaling factor, applied on each axis'
@@ -381,6 +381,33 @@ class OGCCovDataOpener(DataOpener):
             # Fall back to standard endpoint if none specified explicitly.
             return self._server_url + f'/{collection_id}/coverage'
 
+    def _get_collection_properties(self, collection_id: str):
+        url = self._get_collection_link(
+            collection_id,
+            {
+                'rel': {'http://www.opengis.net/def/rel/ogc/1.0/schema'},
+                'type': {'application/json'}
+            },
+            f'collections/{collection_id}/schema'
+        )
+        response = requests.get(url)
+        schema = response.json()
+        return list(schema['properties'].keys())
+
+    def _get_collection_link(
+            self, collection_id: str,
+            selectors: dict[str, Collection[str]], fallback: str) -> str:
+        links = self._get_collection_links(
+            collection_id,
+            selectors
+        )
+        if len(links) > 0:
+            # If multiple coverage links available, use the first.
+            return links[0]
+        else:
+            # Fall back to standard endpoint if none specified explicitly.
+            return self._server_url + '/' + fallback
+
     def _get_collection_links(self, collection_id: str,
                               selectors: dict[str, Collection[str]]) -> \
             list[str]:
@@ -392,7 +419,6 @@ class OGCCovDataOpener(DataOpener):
             if (all([link.get(prop) in selectors[prop] for prop in selectors])
                     and 'href' in link):
                 result.append(link['href'])
-        print(result)
         return result
 
 
