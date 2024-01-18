@@ -26,7 +26,8 @@ import re
 import shutil
 import tempfile
 import datetime
-from typing import Any, Container, Collection, Mapping
+import urllib.parse
+from typing import Any, Container, Collection
 from typing import Dict
 from typing import Iterator
 from typing import Optional
@@ -53,7 +54,6 @@ from xcube.util.jsonschema import (
     JsonBooleanSchema,
     JsonArraySchema,
     JsonNumberSchema,
-    JsonDatetimeSchema,
 )
 from xcube.util.jsonschema import JsonObjectSchema
 from xcube.util.jsonschema import JsonStringSchema
@@ -142,11 +142,13 @@ class OGCCovDataOpener(DataOpener):
 
         ogc_params = [
             self._convert_store_param(p) for p in all_open_params.items()
-        ] + [("f", "netcdf")]
+        ]
 
-        response = requests.get(
-            self._get_coverage_link(data_id), params=dict(ogc_params)
-        )
+        url = self._get_coverage_link(data_id)
+        if "f" not in urllib.parse.parse_qs(urllib.parse.urlparse(url).query):
+            ogc_params += [("f", "netcdf")]
+
+        response = requests.get(url, params=dict(ogc_params))
 
         if response.status_code == 200:
             temp_subdir = tempfile.mkdtemp(dir=self._tempdir)
@@ -201,7 +203,7 @@ class OGCCovDataOpener(DataOpener):
             return "bbox", f"{x0},{y0},{x1},{y1}"
         elif key == "properties":
             return "properties", ",".join(value)
-        elif key in {"scale-axes", "scale-size"}:
+        elif key in {"scale_axes", "scale_size"}:
             return (
                 key.replace("_", "-"),
                 ",".join([f"{ax}({v})" for ax, v in value.items()]),
@@ -332,30 +334,13 @@ class OGCCovDataOpener(DataOpener):
     def _normalize_dataset(self, dataset):
         dataset = xcube.core.normalize.normalize_dataset(dataset)
 
-        # These steps should be taken care of by the core normalizer now.
-        # TODO: check that they are.
-        # dataset = dataset.rename_dims({
-        #     'longitude': 'lon',
-        #     'latitude': 'lat'
-        # })
-        # dataset = dataset.rename_vars({'longitude': 'lon', 'latitude': 'lat'})
-        # dataset.transpose('time', ..., 'lat', 'lon')
-
         dataset.coords["time"].attrs["standard_name"] = "time"
-        # Correct units not entirely clear: cubespec document says
-        # degrees_north / degrees_east for WGS84 Schema, but SH Plugin
-        # had decimal_degrees.
         if "lat" in dataset.coords:
             dataset.coords["lat"].attrs["standard_name"] = "latitude"
             dataset.coords["lat"].attrs["units"] = "degrees_north"
         if "lon" in dataset.coords:
             dataset.coords["lon"].attrs["standard_name"] = "longitude"
             dataset.coords["lon"].attrs["units"] = "degrees_east"
-
-        # TODO: Temporal coordinate variables MUST have units, standard_name,
-        # and any others. standard_name MUST be "time", units MUST have
-        # format "<deltatime> since <datetime>", where datetime must have
-        # ISO-format.
 
         if self._normalize_names:
             rename_dict = {}
@@ -435,10 +420,10 @@ class OGCCovDataOpener(DataOpener):
     ) -> str:
         links = self._get_collection_links(collection_id, selectors)
         if len(links) > 0:
-            # If multiple coverage links available, use the first.
+            # If multiple collection links available, use the first.
             return links[0]
         else:
-            # Fall back to standard endpoint if none specified explicitly.
+            # Use supplied fallback link if none found in collection links
             return self._server_url + "/" + fallback
 
     def _get_collection_links(
