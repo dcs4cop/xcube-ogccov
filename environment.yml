@@ -3,3 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - xcube >=1.2.0
+# Testing dependencies
+  - requests-mock >=1.8
+  - pytest >=4.4
+  - pytest-cov >=2.6
