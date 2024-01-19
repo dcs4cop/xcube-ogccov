@@ -193,7 +193,7 @@ class OGCCovDataOpener(DataOpener):
             else:
                 raise ValueError(f'Invalid datetime: "{value}"')
         elif key == "subset":
-            return "subset", OGCCovDataOpener._subset_dict_to_string(value)
+            return "subset", OGCCovDataOpener.subset_dict_to_string(value)
         elif key == "bbox":
             x0, y0, x1, y1 = value
             return "bbox", f"{x0},{y0},{x1},{y1}"
@@ -212,7 +212,7 @@ class OGCCovDataOpener(DataOpener):
             raise ValueError(f'Unknown parameter "{key}"')
 
     @staticmethod
-    def _subset_dict_to_string(subset_dict: dict[str, Any]) -> str:
+    def subset_dict_to_string(subset_dict: dict[str, Any]) -> str:
         parts = []
         for axis, range_ in subset_dict.items():
             if isinstance(range_, collections.abc.Sequence) and not isinstance(
