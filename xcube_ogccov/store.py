@@ -35,10 +35,6 @@ from typing import Tuple
 from typing import Union
 import collections.abc
 
-import dateutil.parser
-import dateutil.relativedelta
-import dateutil.rrule
-import numpy as np
 import requests
 import xarray as xr
 import xcube.core.normalize
@@ -138,8 +134,6 @@ class OGCCovDataOpener(DataOpener):
         }
         all_open_params.update(open_params)
 
-        # dataset = self._create_empty_dataset(data_id, all_open_params)
-
         ogc_params = [
             self._convert_store_param(p) for p in all_open_params.items()
         ]
@@ -155,7 +149,9 @@ class OGCCovDataOpener(DataOpener):
             filepath = os.path.join(temp_subdir, "dataset.nc")
             with open(filepath, "bw") as fh:
                 fh.write(response.content)
-            dataset = xr.open_dataset(filepath, engine="netcdf4")
+            dataset = self._normalize_dataset(
+                xr.open_dataset(filepath, engine="netcdf4")
+            )
 
             if save_zarr_to:
                 dataset.to_zarr(save_zarr_to)
@@ -232,104 +228,6 @@ class OGCCovDataOpener(DataOpener):
             else:
                 parts.append(f"{axis}({str(range_)})")
         return ",".join(parts)
-
-    def _create_empty_dataset(self, data_id, open_params: dict) -> xr.Dataset:
-        """Make a dataset with space and time dimensions but no data variables
-
-        :param open_params: opener parameters
-        :return: a dataset with the spatial and temporal dimensions given in
-                 the supplied parameters and no data variables
-        """
-
-        store = OGCCovDataStore()
-        data_descriptor = store.describe_data(data_id)
-        bbox = open_params.get("bbox", data_descriptor.bbox)
-        spatial_res = open_params.get(
-            "spatial_res", data_descriptor.spatial_res
-        )
-        # arange returns a half-open range, so we add *almost* a whole
-        # spatial_res to the upper limit to make sure that it's included.
-        lons = np.arange(bbox[0], bbox[2] + (spatial_res * 0.99), spatial_res)
-        lats = np.arange(bbox[1], bbox[3] + (spatial_res * 0.99), spatial_res)
-
-        time_range = open_params["time_range"]
-        times = self._create_time_range(
-            time_range[0], time_range[1], data_descriptor.time_period
-        )
-        return xr.Dataset({}, coords={"time": times, "lat": lats, "lon": lons})
-
-    @staticmethod
-    def _create_time_range(t_start: str, t_end: str, t_interval: str):
-        """Turn a start, end, and time interval into an array of datetime64s
-
-        The array will contain times spaced at t_interval.
-        If the time from start to end is not an exact multiple of the
-        specified interval, the range will extend beyond t_end by a fraction
-        of an interval.
-
-        :param t_start: start of time range (inclusive) (ISO 8601)
-        :param t_end: end of time range (inclusive) (ISO 8601)
-        :param t_interval: time interval (format e.g. "2W", "3M" "1Y")
-        :return: a NumPy array of datetime64 data from t_start to t_end with
-                 an interval of t_period. If t_period is in months or years,
-                 t_start and t_end will be rounded (down and up respectively)
-                 to the nearest whole month.
-        """
-        dt_start = dateutil.parser.isoparse(t_start)
-        dt_end = (
-            datetime.datetime.now()
-            if t_end is None
-            else dateutil.parser.isoparse(t_end)
-        )
-        period_number, period_unit = OGCCovDataOpener._parse_time_period(
-            t_interval
-        )
-        timedelta = np.timedelta64(period_number, period_unit)
-        relativedelta = OGCCovDataOpener._period_to_relativedelta(
-            period_number, period_unit
-        )
-        one_microsecond = dateutil.relativedelta.relativedelta(microseconds=1)
-        # Months and years can be of variable length, so we need to reduce the
-        # resolution of the start and end appropriately if the aggregation
-        # period is in one of these units.
-        if period_unit in "MY":
-            range_start = dt_start.strftime("%Y-%m")
-            range_end = (dt_end + relativedelta - one_microsecond).strftime(
-                "%Y-%m"
-            )
-        else:
-            range_start = dt_start.isoformat()
-            range_end = (dt_end + relativedelta - one_microsecond).isoformat()
-
-        return np.arange(
-            range_start, range_end, timedelta, dtype=f"datetime64"
-        )
-
-    @staticmethod
-    def _parse_time_period(specifier: str) -> Tuple[int, str]:
-        """Convert a time period (e.g. '10D', 'Y') to a NumPy timedelta"""
-        time_match = re.match(r"^(\d+)([hmsDWMY])$", specifier)
-        time_number_str = time_match.group(1)
-        time_number = 1 if time_number_str == "" else int(time_number_str)
-        time_unit = time_match.group(2)
-        return time_number, time_unit
-
-    @staticmethod
-    def _period_to_relativedelta(
-        number: int, unit: str
-    ) -> dateutil.relativedelta:
-        conversion = dict(
-            Y="years",
-            M="months",
-            D="days",
-            W="weeks",
-            h="hours",
-            m="minutes",
-            s="seconds",
-        )
-        return dateutil.relativedelta.relativedelta(
-            **{conversion[unit]: number}
-        )
 
     def _normalize_dataset(self, dataset):
         dataset = xcube.core.normalize.normalize_dataset(dataset)
