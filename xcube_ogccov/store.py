@@ -60,14 +60,14 @@ from xcube_ogccov.constants import OGCCOV_DATA_OPENER_ID
 class OGCCovDataOpener(DataOpener):
     """A data opener for OGC API - Coverages"""
 
-    def __init__(self, server_url=None):
+    def __init__(self, server_url=None, normalize_names=True):
         """Instantiate an OGC API - Coverages data opener.
 
         :param server_url: URL of the API server
         """
 
         self._server_url = server_url
-        self._normalize_names = True
+        self._normalize_names = normalize_names
         self._create_temporary_directory()
 
     def get_open_data_params_schema(
@@ -135,7 +135,7 @@ class OGCCovDataOpener(DataOpener):
         all_open_params.update(open_params)
 
         ogc_params = [
-            self._convert_store_param(p) for p in all_open_params.items()
+            self.convert_store_param(p) for p in all_open_params.items()
         ]
 
         url = self._get_coverage_link(data_id)
@@ -180,7 +180,7 @@ class OGCCovDataOpener(DataOpener):
         return data_id in self.get_data_ids(data_type)
 
     @staticmethod
-    def _convert_store_param(kvp: Tuple[str, Any]) -> Tuple[str, str]:
+    def convert_store_param(kvp: Tuple[str, Any]) -> Tuple[str, str]:
         key, value = kvp
         if key in {"scale_factor", "subset_crs", "bbox_crs", "crs"}:
             # Pass through, converting underscores to hyphens if present
@@ -205,6 +205,10 @@ class OGCCovDataOpener(DataOpener):
                 ",".join([f"{ax}({v})" for ax, v in value.items()]),
             )
         else:
+            # This is a "can't happen", since validation against the schema
+            # catches unknown parameters and this function matches all known
+            # parameters. But if that accidentally changes in the future,
+            # this is a good place to catch it.
             raise ValueError(f'Unknown parameter "{key}"')
 
     @staticmethod
@@ -295,7 +299,7 @@ class OGCCovDataOpener(DataOpener):
             return links[0]
         else:
             # Fall back to standard endpoint if none specified explicitly.
-            return self._server_url + f"/{collection_id}/coverage"
+            return f"{self._server_url}/collections/{collection_id}/coverage"
 
     def _get_collection_properties(self, collection_id: str):
         url = self._get_collection_link(
