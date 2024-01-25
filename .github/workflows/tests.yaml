@@ -23,6 +23,9 @@ jobs:
           post-cleanup: 'all'
       - name: install-package
         shell: bash -l {0}
+        # Currently we install the latest repo version of xcube, since
+        # xcube.webapi.ows.coverages.request.CoverageRequest is required for
+        # some tests and hasn't made it into a release yet.
         run: |
           micromamba info
           micromamba list

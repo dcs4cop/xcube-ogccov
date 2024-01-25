@@ -1,6 +1,7 @@
 # xcube-ogccov: OGC API - Coverages data store for xcube
 
 [![CI](https://github.com/dcs4cop/xcube-ogccov/actions/workflows/tests.yaml/badge.svg)](https://github.com/dcs4cop/xcube-ogccov/actions/workflows/tests.yaml)
+[![codecov](https://codecov.io/gh/dcs4cop/xcube-ogccov/graph/badge.svg?token=8IMpBPNFsf)](https://codecov.io/gh/dcs4cop/xcube-ogccov)
 
 This data store allows xcube to read data via OGC API - Coverages.
 
