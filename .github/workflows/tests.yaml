@@ -26,6 +26,7 @@ jobs:
         run: |
           micromamba info
           micromamba list
+          pip install git+https://github.com/dcs4cop/xcube.git@master
           python setup.py develop
       - name: run-tests
         shell: bash -l {0}
