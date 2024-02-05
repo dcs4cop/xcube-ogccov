@@ -15,7 +15,7 @@ caller as an xcube dataset.
 
 At the time of writing, OGC API - Coverages is still in a draft state, so
 compatibility with all implementing servers cannot be guaranteed. xcube-ogccov
-has mainly been tested with xcube’s own  OGC API - Coverage server
+has mainly been tested with xcube’s own OGC API - Coverages server
 implementation.
 
 ## Installation
